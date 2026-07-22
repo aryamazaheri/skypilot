@@ -127,6 +127,10 @@ _KNOWN_VIEWER_DENIED: set = {
     ('/slurm_clusters', 'GET'),
     ('/slurm_clusters', 'POST'),
     ('/slurm_clusters/{name}', 'DELETE'),
+    # --- Cloud credential registration (control-plane; same reasoning) ---
+    ('/cloud_credentials', 'GET'),
+    ('/cloud_credentials', 'POST'),
+    ('/cloud_credentials/{name}', 'DELETE'),
     # --- Debug ---
     # /debug/dump_create is intentionally on the viewer allowlist (see
     # _DEFAULT_VIEWER_ALLOWLIST) so viewers can capture support diagnostics;

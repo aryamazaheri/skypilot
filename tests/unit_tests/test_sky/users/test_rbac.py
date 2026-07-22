@@ -108,6 +108,18 @@ class TestGetRolePermissions:
             'method': 'DELETE'
         } in blocklist
 
+    def test_cloud_credentials_blocked_for_user(self):
+        # The whole /cloud_credentials registration surface (GET included,
+        # since names + tenant detail are cross-tenant metadata) is
+        # control-plane and blocked for the user role.
+        blocklist = self._user_blocklist(False)
+        assert {'path': '/cloud_credentials', 'method': 'GET'} in blocklist
+        assert {'path': '/cloud_credentials', 'method': 'POST'} in blocklist
+        assert {
+            'path': '/cloud_credentials/:name',
+            'method': 'DELETE'
+        } in blocklist
+
 
 class TestGetViewerAllowlist:
     """rbac.get_viewer_allowlist composes defaults + config + plugin entries."""

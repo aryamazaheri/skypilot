@@ -76,6 +76,18 @@ _DEFAULT_USER_BLOCKLIST = [
     {
         'path': '/slurm_clusters/:name',
         'method': 'DELETE'
+    },
+    {
+        'path': '/cloud_credentials',
+        'method': 'GET'
+    },
+    {
+        'path': '/cloud_credentials',
+        'method': 'POST'
+    },
+    {
+        'path': '/cloud_credentials/:name',
+        'method': 'DELETE'
     }
 ]
 

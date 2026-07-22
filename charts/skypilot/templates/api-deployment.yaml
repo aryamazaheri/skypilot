@@ -374,6 +374,18 @@ spec:
         - name: state-volume
           mountPath: /root/sky_logs
           subPath: sky_logs
+        # Persist the dynamic BYO registration files written by the
+        # /slurm_clusters and /cloud_credentials APIs (per-cluster identity
+        # keys, per-tenant cloud credential files) — these must survive pod
+        # rescheduling or every registered backend silently breaks.
+        - name: state-volume
+          mountPath: /root/.nebius
+          subPath: .nebius
+        {{- if not .Values.slurmCredentials.config }}
+        - name: state-volume
+          mountPath: /root/.slurm
+          subPath: .slurm
+        {{- end }}
         {{- end }}
         - name: skypilot-config
           mountPath: /var/skypilot/config

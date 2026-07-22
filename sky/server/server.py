@@ -56,6 +56,7 @@ from sky.jobs import utils as managed_job_utils
 from sky.jobs.server import server as jobs_rest
 from sky.metrics import utils as metrics_utils
 from sky.provision import metadata_utils
+from sky.provision.cloud_creds import server as cloud_credentials_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.slurm import server as slurm_clusters_rest
 from sky.provision.slurm import utils as slurm_utils
@@ -1090,6 +1091,9 @@ app.include_router(ssh_node_pools_rest.router,
 app.include_router(slurm_clusters_rest.router,
                    prefix='/slurm_clusters',
                    tags=['slurm_clusters'])
+app.include_router(cloud_credentials_rest.router,
+                   prefix='/cloud_credentials',
+                   tags=['cloud_credentials'])
 app.include_router(recipes_rest.router, prefix='/recipes', tags=['recipes'])
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
