@@ -114,3 +114,36 @@ def test_scp_of_kubeconfig_uses_capital_P_for_the_port():
     block = '\n'.join(lines[start:end])
     assert "'-P'" in block and 'head_port' in block
     assert "'-p'" not in block
+
+
+def _k3s_install_block() -> str:
+    """The head-node k3s install command, as a single source block."""
+    import inspect
+
+    from sky.ssh_node_pools.deploy import deploy
+
+    lines = inspect.getsource(deploy.deploy_single_cluster).splitlines()
+    start = next(i for i, ln in enumerate(lines) if 'get.k3s.io' in ln)
+    end = next(i for i, ln in enumerate(lines[start:], start)
+               if 'run_remote' in ln)
+    return '\n'.join(lines[start:end])
+
+
+def test_head_node_wait_targets_that_node_not_every_node():
+    """`kubectl wait ... node --all` waits for EVERY node in the cluster, so one
+    permanently-NotReady leftover (e.g. a node object from an earlier enrollment of
+    the same box, named by its hostname) makes every future deploy of that machine
+    time out and fail — observed live: 3x2min then "Failed to deploy K3s". Wait for
+    the node this install just created instead."""
+    block = _k3s_install_block()
+    assert 'node/{head_node}' in block
+    assert '--all' not in block
+
+
+def test_head_node_wait_does_not_fail_on_a_successful_third_attempt():
+    """The old loop tested `[ $i -eq 3 ]` afterwards, so succeeding on the LAST
+    attempt was reported as failure (i is still 3 after `break`). Success must be
+    tracked explicitly, not inferred from the counter."""
+    block = _k3s_install_block()
+    assert 'ready=1' in block
+    assert '$i -eq 3' not in block

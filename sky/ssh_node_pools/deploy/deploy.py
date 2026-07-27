@@ -525,16 +525,16 @@ def deploy_single_cluster(cluster_name,
         mkdir -p ~/.kube &&
         sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
         sudo -A chown $(id -u):$(id -g) ~/.kube/config &&
-        for i in {{1..3}}; do
-            if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
+        for i in 1 2 3; do
+            if kubectl wait --for=condition=ready "node/{head_node}" --timeout=2m --kubeconfig ~/.kube/config; then
+                ready=1
                 break
-            else
-                echo 'Waiting for nodes to be ready...'
-                sleep 5
             fi
+            echo 'Waiting for the head node to be ready...'
+            sleep 5
         done
-        if [ $i -eq 3 ]; then
-            echo 'Failed to wait for nodes to be ready after 3 attempts'
+        if [ "${{ready:-0}}" != 1 ]; then
+            echo 'Head node did not become ready after 3 attempts'
             exit 1
         fi
     """
