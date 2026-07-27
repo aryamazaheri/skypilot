@@ -6,6 +6,7 @@ from typing import List, Optional
 import colorama
 
 from sky import sky_logging
+from sky.ssh_node_pools import constants
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -93,8 +94,13 @@ def run_remote(node,
                use_ssh_config=False,
                print_output=False,
                use_shell=False,
-               silent=False):
-    """Run a command on a remote machine via SSH."""
+               silent=False,
+               port=constants.DEFAULT_SSH_PORT):
+    """Run a command on a remote machine via SSH.
+
+    `port` is the host's sshd port; it is ignored when use_ssh_config is set
+    (the user's ssh config supplies its own Port).
+    """
     ssh_cmd: List[str]
     if use_ssh_config:
         # Use SSH config for connection parameters
@@ -106,6 +112,9 @@ def run_remote(node,
             '-o', f'ConnectTimeout={connect_timeout}', '-o',
             'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'
         ]
+
+        if port and int(port) != constants.DEFAULT_SSH_PORT:
+            ssh_cmd.extend(['-p', str(int(port))])
 
         if ssh_key:
             if not os.path.isfile(ssh_key):
@@ -138,7 +147,12 @@ def ensure_directory_exists(path):
         os.makedirs(directory, exist_ok=True)
 
 
-def check_gpu(node, user, ssh_key, use_ssh_config=False, is_head=False):
+def check_gpu(node,
+              user,
+              ssh_key,
+              use_ssh_config=False,
+              is_head=False,
+              port=constants.DEFAULT_SSH_PORT):
     """Check if a node has a GPU."""
     cmd = ('command -v nvidia-smi &> /dev/null && '
            'nvidia-smi --query-gpu=gpu_name --format=csv,noheader')
@@ -147,7 +161,8 @@ def check_gpu(node, user, ssh_key, use_ssh_config=False, is_head=False):
                         user,
                         ssh_key,
                         use_ssh_config=use_ssh_config,
-                        silent=True)
+                        silent=True,
+                        port=port)
     if result is not None:
         # Check that all GPUs have the same type.
         # Currently, SkyPilot does not support heterogeneous GPU node

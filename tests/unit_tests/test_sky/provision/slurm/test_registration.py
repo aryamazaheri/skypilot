@@ -38,11 +38,32 @@ class TestRegisterCluster:
         assert resolved['hostname'] == '10.0.0.1'
         assert resolved['user'] == 'ubuntu'
         assert resolved['port'] == '2222'
-        assert resolved['proxyjump'] == 'bastion'
         assert resolved['identitiesonly'] == 'yes'
-        # Host-key pinning is expressed when host_key is provided.
-        assert resolved['stricthostkeychecking'] == 'yes'
-        assert 'userknownhostsfile' in resolved
+        # Host-key pinning is enforced via a ProxyCommand (the runner ignores
+        # block-level StrictHostKeyChecking/UserKnownHostsFile — see _render_block).
+        pc = resolved['proxycommand']
+        assert 'StrictHostKeyChecking=yes' in pc
+        assert 'UserKnownHostsFile=' in pc
+        # The jump host is folded into the pinning re-dial, not a separate ProxyJump.
+        assert '-J bastion' in pc
+        assert 'proxyjump' not in resolved
+        assert 'stricthostkeychecking' not in resolved  # not at block level
+
+    def test_host_key_pin_matches_bastion_tunnel_endpoint(self, manager):
+        # Bastion-tunnel shape: bare login-node pubkey + non-22 (reverse) port. The
+        # known_hosts entry must be keyed by [host]:port so the pin actually matches,
+        # and the ProxyCommand re-dials that port.
+        manager.register_cluster('slurm-t',
+                                 host='bastion.example',
+                                 user='arya',
+                                 identity_file='DEPLOYKEY',
+                                 port=20005,
+                                 host_key='ssh-ed25519 AAAALOGINKEY root@login')
+        kh = open(os.path.join(manager.known_hosts_dir, 'slurm-t')).read()
+        assert kh.startswith('[bastion.example]:20005 ssh-ed25519 AAAALOGINKEY')
+        pc = _resolved(manager, 'slurm-t')['proxycommand']
+        assert '-p 20005' in pc
+        assert 'UserKnownHostsFile=' in pc and 'StrictHostKeyChecking=yes' in pc
 
     def test_identity_file_is_0600(self, manager):
         manager.register_cluster('slurm-a',

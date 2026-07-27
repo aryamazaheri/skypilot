@@ -207,6 +207,7 @@ def deploy_multiple_clusters(
             worker_nodes = [h['ip'] for h in worker_hosts]
             ssh_user = head_host['user']
             ssh_key = head_host['identity_file']
+            head_port = head_host.get('port', constants.DEFAULT_SSH_PORT)
             head_use_ssh_config = head_host.get('use_ssh_config', False)
             worker_use_ssh_config = [
                 h.get('use_ssh_config', False) for h in worker_hosts
@@ -229,7 +230,8 @@ def deploy_multiple_clusters(
                 worker_hosts=worker_hosts,
                 history_worker_nodes=history_worker_nodes,
                 history_workers_info=history_workers_info,
-                history_use_ssh_config=history_use_ssh_config)
+                history_use_ssh_config=history_use_ssh_config,
+                head_port=head_port)
 
             if not cleanup:
                 successful_hosts = []
@@ -281,7 +283,8 @@ def deploy_single_cluster(cluster_name,
                           worker_hosts=None,
                           history_worker_nodes=None,
                           history_workers_info=None,
-                          history_use_ssh_config=None) -> List[str]:
+                          history_use_ssh_config=None,
+                          head_port=constants.DEFAULT_SSH_PORT) -> List[str]:
     """Deploy or clean up a single Kubernetes cluster.
 
     Returns: List of unsuccessful worker nodes.
@@ -314,7 +317,8 @@ def deploy_single_cluster(cluster_name,
         f'echo \'SSH connection successful ({head_node})\'',
         ssh_user,
         ssh_key,
-        use_ssh_config=head_use_ssh_config)
+        use_ssh_config=head_use_ssh_config,
+        port=head_port)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -351,6 +355,9 @@ def deploy_single_cluster(cluster_name,
                                        else create_askpass_script(
                                            history_info['password'])),
                         use_ssh_config=use_ssh_config,
+                        port=(head_port if history_info is None
+                              else history_info.get('port',
+                                                    constants.DEFAULT_SSH_PORT)),
                     ))
                 remove_worker_cmds.append(
                     f'kubectl delete node -l skypilot-ip={history_node}')
@@ -376,6 +383,8 @@ def deploy_single_cluster(cluster_name,
                                    create_askpass_script(info['password'])),
                     use_ssh_config=use_ssh_config,
                     is_worker=not is_ha_server,
+                    port=(head_port if info is None
+                          else info.get('port', constants.DEFAULT_SSH_PORT)),
                 ))
 
         # Clean up head node
@@ -384,7 +393,8 @@ def deploy_single_cluster(cluster_name,
                      ssh_key,
                      askpass_block,
                      use_ssh_config=head_use_ssh_config,
-                     is_worker=False)
+                     is_worker=False,
+                     port=head_port)
     # Clean up worker nodes
     force_update_status(f'Cleaning up worker nodes [{cluster_name}]')
     with cf.ThreadPoolExecutor() as executor:
@@ -460,7 +470,8 @@ def deploy_single_cluster(cluster_name,
                                      ssh_user,
                                      ssh_key,
                                      use_ssh_config=head_use_ssh_config,
-                                     use_shell=True)
+                                     use_shell=True,
+                                     port=head_port)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -531,7 +542,8 @@ def deploy_single_cluster(cluster_name,
                                      cmd,
                                      ssh_user,
                                      ssh_key,
-                                     use_ssh_config=head_use_ssh_config)
+                                     use_ssh_config=head_use_ssh_config,
+                                     port=head_port)
     if result is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -545,7 +557,8 @@ def deploy_single_cluster(cluster_name,
                               ssh_user,
                               ssh_key,
                               use_ssh_config=head_use_ssh_config,
-                              is_head=True):
+                              is_head=True,
+                              port=head_port):
         install_gpu = True
 
     # Fetch the head node's internal IP (this will be passed to worker nodes).
@@ -556,7 +569,8 @@ def deploy_single_cluster(cluster_name,
         'ip -4 route get 1 | awk \'{for(i=1;i<=NF;i++)if($i=="src"){print $(i+1);exit}}\'',
         ssh_user,
         ssh_key,
-        use_ssh_config=head_use_ssh_config)
+        use_ssh_config=head_use_ssh_config,
+        port=head_port)
     if master_addr is None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Failed to SSH to head node ({head_node}). '
@@ -571,10 +585,13 @@ def deploy_single_cluster(cluster_name,
                 server_user = server_host['user']
                 server_key = server_host['identity_file']
                 server_password = server_host['password']
+                server_port = server_host.get('port',
+                                              constants.DEFAULT_SSH_PORT)
             else:
                 server_user = ssh_user
                 server_key = ssh_key
                 server_password = None
+                server_port = head_port      # inherit, like user/key above
             server_askpass = create_askpass_script(server_password)
             server_ssh_config = (ha_server_use_ssh_config[i]
                                  if ha_server_use_ssh_config else False)
@@ -589,7 +606,8 @@ def deploy_single_cluster(cluster_name,
                 server_key,
                 server_askpass,
                 tls_sans,
-                use_ssh_config=server_ssh_config)
+                use_ssh_config=server_ssh_config,
+                port=server_port)
             install_gpu = install_gpu or has_gpu
             if not suc:
                 with ux_utils.print_exception_no_traceback():
@@ -617,11 +635,14 @@ def deploy_single_cluster(cluster_name,
             worker_password = worker_hosts[i]['password']
             worker_askpass = create_askpass_script(worker_password)
             worker_config = worker_use_ssh_config[i]
+            worker_port = worker_hosts[i].get('port',
+                                              constants.DEFAULT_SSH_PORT)
         else:
             worker_user = ssh_user
             worker_key = ssh_key
             worker_askpass = askpass_block
             worker_config = worker_use_ssh_config[i]
+            worker_port = head_port          # inherit, like user/key above
 
         return start_agent_node(node,
                                 master_addr,
@@ -629,7 +650,8 @@ def deploy_single_cluster(cluster_name,
                                 worker_user,
                                 worker_key,
                                 worker_askpass,
-                                use_ssh_config=worker_config)
+                                use_ssh_config=worker_config,
+                                port=worker_port)
 
     unsuccessful_workers = []
 
@@ -664,9 +686,15 @@ def deploy_single_cluster(cluster_name,
         else:
             scp_cmd = [
                 'scp', '-o', 'StrictHostKeyChecking=no', '-o',
-                'IdentitiesOnly=yes', '-i', ssh_key,
-                f'{ssh_user}@{head_node}:~/.kube/config', temp_kubeconfig
+                'IdentitiesOnly=yes'
             ]
+            if head_port and int(head_port) != constants.DEFAULT_SSH_PORT:
+                # scp spells the port -P, not -p.
+                scp_cmd.extend(['-P', str(int(head_port))])
+            scp_cmd.extend([
+                '-i', ssh_key, f'{ssh_user}@{head_node}:~/.kube/config',
+                temp_kubeconfig
+            ])
         deploy_utils.run_command(scp_cmd, shell=False)
 
         # Create the directory for the kubeconfig file if it doesn't exist
@@ -910,7 +938,8 @@ def deploy_single_cluster(cluster_name,
                                           ssh_user,
                                           ssh_key,
                                           context_name,
-                                          use_ssh_config=head_use_ssh_config)
+                                          use_ssh_config=head_use_ssh_config,
+                                          ssh_port=head_port)
 
     logger.debug(f'kubectl configured with new context \'{context_name}\'.')
     success_message(f'SkyPilot runtime is up [{cluster_name}].')
@@ -946,7 +975,8 @@ def deploy_single_cluster(cluster_name,
                                          cmd,
                                          ssh_user,
                                          ssh_key,
-                                         use_ssh_config=head_use_ssh_config)
+                                         use_ssh_config=head_use_ssh_config,
+                                         port=head_port)
         if result is None:
             logger.error(f'{colorama.Fore.RED}Failed to install GPU Operator.'
                          f'{RESET_ALL}')
@@ -982,7 +1012,8 @@ def deploy_single_cluster(cluster_name,
                                            ssh_user,
                                            ssh_key,
                                            use_ssh_config=head_use_ssh_config,
-                                           print_output=True)
+                                           print_output=True,
+                                           port=head_port)
 
         if selector is None:
             logger.error(
@@ -998,7 +1029,8 @@ def deploy_single_cluster(cluster_name,
                 ssh_user,
                 ssh_key,
                 use_ssh_config=head_use_ssh_config,
-                print_output=True)
+                print_output=True,
+                port=head_port)
             if svc_result is None:
                 logger.error(
                     f'{colorama.Fore.RED}Failed to create dcgm-exporter '
@@ -1020,7 +1052,8 @@ def deploy_single_cluster(cluster_name,
                                           ssh_user,
                                           ssh_key,
                                           use_ssh_config=head_use_ssh_config,
-                                          print_output=True)
+                                          print_output=True,
+                                          port=head_port)
     if prom_result is None:
         # Log and continue — the cluster is still usable without Prometheus.
         logger.error(
@@ -1170,7 +1203,8 @@ def cleanup_node(node,
                  ssh_key,
                  askpass_block,
                  use_ssh_config=False,
-                 is_worker=True):
+                 is_worker=True,
+                 port=constants.DEFAULT_SSH_PORT):
     """Uninstall k3s and clean up the state on a node."""
     ntype = 'worker' if is_worker else 'head'
     force_update_status(f'Cleaning up {ntype} node ({node})...')
@@ -1185,7 +1219,8 @@ def cleanup_node(node,
                                      cmd,
                                      user,
                                      ssh_key,
-                                     use_ssh_config=use_ssh_config)
+                                     use_ssh_config=use_ssh_config,
+                                     port=port)
     if result is None:
         logger.error(f'{colorama.Fore.RED}Failed to clean up {ntype} '
                      f'node ({node}).{RESET_ALL}')
@@ -1200,7 +1235,8 @@ def start_server_node(node,
                       ssh_key,
                       askpass_block,
                       tls_sans,
-                      use_ssh_config=False):
+                      use_ssh_config=False,
+                      port=constants.DEFAULT_SSH_PORT):
     """Start a k3s server node for HA (joins existing cluster).
 
     Returns: (node, success, has_gpu) tuple."""
@@ -1216,7 +1252,8 @@ def start_server_node(node,
                                      cmd,
                                      user,
                                      ssh_key,
-                                     use_ssh_config=use_ssh_config)
+                                     use_ssh_config=use_ssh_config,
+                                     port=port)
     if result is None:
         logger.error(f'{colorama.Fore.RED}✗ Failed to join HA server '
                      f'node ({node}).{RESET_ALL}')
@@ -1226,7 +1263,8 @@ def start_server_node(node,
     if deploy_utils.check_gpu(node,
                               user,
                               ssh_key,
-                              use_ssh_config=use_ssh_config):
+                              use_ssh_config=use_ssh_config,
+                              port=port):
         logger.info(f'{colorama.Fore.YELLOW}GPU detected on HA server node '
                     f'({node}).{RESET_ALL}')
         return node, True, True
@@ -1239,7 +1277,8 @@ def start_agent_node(node,
                      user,
                      ssh_key,
                      askpass_block,
-                     use_ssh_config=False):
+                     use_ssh_config=False,
+                     port=constants.DEFAULT_SSH_PORT):
     """Start a k3s agent node.
     Returns: if the start is successful, and whether the node has a GPU."""
     logger.info(f'Deploying worker node ({node}).')
@@ -1252,7 +1291,8 @@ def start_agent_node(node,
                                      cmd,
                                      user,
                                      ssh_key,
-                                     use_ssh_config=use_ssh_config)
+                                     use_ssh_config=use_ssh_config,
+                                     port=port)
     if result is None:
         logger.error(f'{colorama.Fore.RED}✗ Failed to deploy K3s on worker '
                      f'node ({node}).{RESET_ALL}')
@@ -1263,7 +1303,8 @@ def start_agent_node(node,
     if deploy_utils.check_gpu(node,
                               user,
                               ssh_key,
-                              use_ssh_config=use_ssh_config):
+                              use_ssh_config=use_ssh_config,
+                              port=port):
         logger.info(f'{colorama.Fore.YELLOW}GPU detected on worker node '
                     f'({node}).{RESET_ALL}')
         return node, True, True

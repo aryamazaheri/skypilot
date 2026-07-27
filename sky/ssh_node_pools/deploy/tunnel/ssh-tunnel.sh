@@ -5,7 +5,8 @@
 # is calculated based on the TTL argument and is required to force kubectl to
 # check the tunnel status frequently.
 
-# Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT] [--ttl SECONDS]
+# Usage: ssh-tunnel.sh --host HOST [--user USER] [--use-ssh-config] [--ssh-key KEY] [--context CONTEXT] [--port PORT] [--ssh-port SSH_PORT] [--ttl SECONDS]
+# --port is the LOCAL forwarded port for the k8s API; --ssh-port is the remote sshd port.
 
 # Default time-to-live for credential in seconds
 # This forces kubectl to check the tunnel status frequently
@@ -18,6 +19,7 @@ CONTEXT=""
 HOST=""
 USER=""
 PORT=6443  # Default port if not specified
+SSH_PORT=22  # Remote sshd port
 
 # Debug log to ~/.sky/ssh_node_pools_info/$CONTEXT-tunnel.log
 debug_log() {
@@ -87,6 +89,11 @@ generate_ssh_command() {
     else
       SSH_CMD=("ssh" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N")
       
+      # Add non-default sshd port (e.g. a reverse-tunnel forward on a bastion)
+      if [[ -n "$SSH_PORT" && "$SSH_PORT" != "22" ]]; then
+        SSH_CMD+=("-p" "$SSH_PORT")
+      fi
+
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
         SSH_CMD+=("-i" "$SSH_KEY")
@@ -102,6 +109,11 @@ generate_ssh_command() {
     else
       SSH_CMD=("autossh" "-M" "0" "-o" "StrictHostKeyChecking=no" "-o" "IdentitiesOnly=yes" "-o" "ServerAliveInterval=30" "-o" "ServerAliveCountMax=3" "-o" "ExitOnForwardFailure=yes" "-L" "$PORT:127.0.0.1:6443" "-N")
       
+      # Add non-default sshd port (e.g. a reverse-tunnel forward on a bastion)
+      if [[ -n "$SSH_PORT" && "$SSH_PORT" != "22" ]]; then
+        SSH_CMD+=("-p" "$SSH_PORT")
+      fi
+
       # Add SSH key if provided
       if [[ -n "$SSH_KEY" ]]; then
         SSH_CMD+=("-i" "$SSH_KEY")
@@ -242,6 +254,10 @@ while [[ $# -gt 0 ]]; do
       PORT="$2"
       shift 2
       ;;
+    --ssh-port)
+      SSH_PORT="$2"
+      shift 2
+      ;;
     --host)
       HOST="$2"
       shift 2
@@ -281,7 +297,7 @@ LOG_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.log"
 LOCK_FILE="$TUNNEL_DIR/$CONTEXT-tunnel.lock"
 
 debug_log "Starting ssh-tunnel.sh for context $CONTEXT, host $HOST, port $PORT"
-debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER, TTL: ${TTL_SECONDS}s"
+debug_log "SSH Config: $USE_SSH_CONFIG, User: $USER, SSH port: $SSH_PORT, TTL: ${TTL_SECONDS}s"
 
 # Check if specified port is already in use (tunnel may be running)
 if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then

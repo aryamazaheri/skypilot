@@ -59,6 +59,24 @@ def _validate_name(name: str) -> None:
             'letters, digits, and the characters ".", "_", and "-".')
 
 
+def _known_hosts_contents(host: str, port: int, host_key: str) -> str:
+    """known_hosts file contents pinning ``host_key`` for ``host``:``port``.
+
+    Accepts either a full known_hosts line (already carries a host prefix) or a
+    bare OpenSSH public-key line (``ssh-ed25519 AAAA... [comment]``); the latter
+    is prefixed with the OpenSSH host spec — ``[host]:port`` for a non-22 port,
+    the bare host otherwise — so the pin actually matches what ssh looks up. The
+    caller (panofabric) reports the login node's bare host key, so this is what
+    turns it into a usable known_hosts entry for the pinning ProxyCommand.
+    """
+    line = host_key.strip()
+    first = line.split(None, 1)[0] if line else ''
+    if first.startswith(('ssh-', 'ecdsa-', 'sk-')):  # bare pubkey -> add host spec
+        spec = host if int(port) == 22 else f'[{host}]:{port}'
+        return f'{spec} {line}\n'
+    return line if line.endswith('\n') else line + '\n'
+
+
 class SlurmClusterManager:
     """Read-modify-write manager for ``~/.slurm/config`` and its key files."""
 
@@ -116,9 +134,11 @@ class SlurmClusterManager:
             user: SSH user.
             identity_file: Private key *contents* (not a path); stored 0600.
             port: SSH port.
-            host_key: Optional ``known_hosts`` file *contents*. When provided,
-                the block pins the host key with ``StrictHostKeyChecking yes``
-                and a per-cluster ``UserKnownHostsFile``.
+            host_key: Optional host key to pin — either a bare OpenSSH public-key
+                line (the login node's ``ssh_host_ed25519_key.pub``) or full
+                ``known_hosts`` contents. When provided, the block enforces the pin
+                via a ProxyCommand (the runner ignores block-level
+                StrictHostKeyChecking; see ``_render_block``).
             proxy_jump: Optional ``ProxyJump`` value (e.g. a bastion alias).
             identities_only: Whether to set ``IdentitiesOnly yes``.
         """
@@ -135,7 +155,8 @@ class SlurmClusterManager:
             identity_path = self._write_identity_file(name, identity_file)
             known_hosts_path = None
             if host_key:
-                known_hosts_path = self._write_known_hosts_file(name, host_key)
+                known_hosts_path = self._write_known_hosts_file(
+                    name, _known_hosts_contents(host, port, host_key))
 
             block = self._render_block(
                 name=name,
@@ -230,10 +251,32 @@ class SlurmClusterManager:
         if identities_only:
             lines.append('    IdentitiesOnly yes')
         if known_hosts_path is not None:
-            # Pin the host key so a swapped/MITM'd host fails the connection.
-            lines.append('    StrictHostKeyChecking yes')
-            lines.append(f'    UserKnownHostsFile {known_hosts_path}')
-        if proxy_jump:
+            # Enforce the host-key pin via a ProxyCommand. SkyPilot's command
+            # runner forces StrictHostKeyChecking=no + UserKnownHostsFile=/dev/null
+            # and only threads ProxyCommand/ProxyJump
+            # (sky/utils/command_runner.ssh_options_list), so block-level
+            # StrictHostKeyChecking/UserKnownHostsFile are parsed-and-ignored. The
+            # one lever that works is a ProxyCommand that re-dials %h with strict
+            # checking against our per-cluster known_hosts and -W forwards the
+            # verified stream up to the outer session. For a bastion-tunnel cluster
+            # %h/%p are the bastion + reverse-forward port, which IS the login
+            # node's sshd — so pinning the login node's key there detects a
+            # swapped/MITM'd hop. Mirrors panofabric's embedded
+            # SlurmConfigurator._pin_host_key; the pattern is validated end-to-end
+            # against a real cluster (experiments/bastion-tunnel-test, Stage C).
+            proxy = ['ssh', '-W', '%h:%p',
+                     '-o', 'StrictHostKeyChecking=yes',
+                     '-o', f'UserKnownHostsFile={known_hosts_path}',
+                     '-o', 'IdentitiesOnly=yes',
+                     '-i', identity_path,
+                     '-l', user]
+            if port and int(port) != 22:
+                proxy += ['-p', str(port)]
+            if proxy_jump:  # fold the jump host into the pinning re-dial
+                proxy += ['-J', proxy_jump]
+            proxy.append('%h')
+            lines.append('    ProxyCommand ' + ' '.join(proxy))
+        elif proxy_jump:
             lines.append(f'    ProxyJump {proxy_jump}')
         lines.append(_BLOCK_END.format(name=name))
         return '\n'.join(lines) + '\n'

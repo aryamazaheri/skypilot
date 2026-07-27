@@ -116,7 +116,7 @@ def prepare_hosts_info(
     cluster_name: str,
     cluster_config: Dict[str, Any],
     upload_ssh_key_func: Optional[Callable[[str, str], str]] = None
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     """Prepare list of hosts with resolved user, identity_file, and password.
 
     Args:
@@ -131,7 +131,7 @@ def prepare_hosts_info(
             uploading any ssh config to the API server.
 
     Returns:
-        A list of hosts with resolved user, identity_file, and password.
+        A list of hosts with resolved user, identity_file, password, and port.
     """
     if 'hosts' not in cluster_config or not cluster_config['hosts']:
         with ux_utils.print_exception_no_traceback():
@@ -143,6 +143,9 @@ def prepare_hosts_info(
     cluster_identity_file = os.path.expanduser(
         cluster_config.get('identity_file', ''))
     cluster_password = cluster_config.get('password', '')
+    # sshd port, overridable per host. Ignored for hosts resolved through the
+    # user's ssh config, which supplies its own Port.
+    cluster_port = int(cluster_config.get('port', constants.DEFAULT_SSH_PORT))
 
     # Check if cluster identity file exists
     if cluster_identity_file and not os.path.isfile(cluster_identity_file):
@@ -166,6 +169,21 @@ def prepare_hosts_info(
         key_file_on_api_server = upload_ssh_key_func(key_name, identity_file)
         return key_file_on_api_server
 
+    def _check_port_not_shadowed(host, port: int, is_ssh_config_host: bool) -> None:
+        """An ssh-config host takes ALL its connection parameters from that config,
+        including Port — an explicit `port` here would be silently ignored, and the
+        deploy would quietly dial somewhere else. Ambiguous, so refuse rather than
+        pick one. (Only for a non-default port: `port: 22` is what ssh assumes
+        anyway, and a bare host with no `port:` key resolves to it.)"""
+        if is_ssh_config_host and port != constants.DEFAULT_SSH_PORT:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Host {host!r} in Node Pool {cluster_name} matches a stanza in '
+                    f'your SSH config, so its connection parameters come from there '
+                    f'— but a `port: {port}` was also given, which would be ignored. '
+                    f'Remove the `port:` and set `Port {port}` in the SSH config '
+                    f'stanza, or use an address that no stanza matches.')
+
     hosts_info = []
     for i, host in enumerate(cluster_config['hosts']):
         # Host can be a string (IP or SSH config hostname) or a dict
@@ -175,6 +193,7 @@ def prepare_hosts_info(
             if upload_ssh_key_func is not None and is_ssh_config_host:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(use_cluster_config_msg.format(host=host))
+            _check_port_not_shadowed(host, cluster_port, is_ssh_config_host)
 
             hosts_info.append({
                 'ip': host,
@@ -183,6 +202,7 @@ def prepare_hosts_info(
                                  _maybe_hardcode_identity_file(
                                      i, cluster_identity_file),
                 'password': cluster_password,
+                'port': cluster_port,
                 'use_ssh_config': is_ssh_config_host
             })
         else:
@@ -207,6 +227,8 @@ def prepare_hosts_info(
                     i, host.get('identity_file', cluster_identity_file)))
             host_identity_file = os.path.expanduser(host_identity_file)
             host_password = host.get('password', cluster_password)
+            host_port = int(host.get('port', cluster_port))
+            _check_port_not_shadowed(host['ip'], host_port, is_ssh_config_host)
 
             if host_identity_file and not os.path.isfile(host_identity_file):
                 with ux_utils.print_exception_no_traceback():
@@ -218,6 +240,7 @@ def prepare_hosts_info(
                 'user': host_user,
                 'identity_file': host_identity_file,
                 'password': host_password,
+                'port': host_port,
                 'use_ssh_config': is_ssh_config_host
             })
 

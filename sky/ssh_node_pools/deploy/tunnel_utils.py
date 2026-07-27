@@ -100,7 +100,8 @@ def setup_kubectl_ssh_tunnel(head_node,
                              ssh_user,
                              ssh_key,
                              context_name,
-                             use_ssh_config=False):
+                             use_ssh_config=False,
+                             ssh_port=constants.DEFAULT_SSH_PORT):
     """Set up kubeconfig exec credential plugin for SSH tunnel"""
     logger.info(f'{colorama.Fore.YELLOW}➜ Setting up SSH tunnel for '
                 f'Kubernetes API access...{colorama.Style.RESET_ALL}')
@@ -161,7 +162,8 @@ def setup_kubectl_ssh_tunnel(head_node,
                 f'--exec-arg={ttl_seconds}', '--exec-arg=--host',
                 f'--exec-arg={head_node}', '--exec-arg=--user',
                 f'--exec-arg={ssh_user}', '--exec-arg=--ssh-key',
-                f'--exec-arg={ssh_key}'
+                f'--exec-arg={ssh_key}', '--exec-arg=--ssh-port',
+                f'--exec-arg={ssh_port}'
             ])
 
     logger.info(f'{colorama.Fore.GREEN}✔ SSH tunnel configured through '
