@@ -1000,27 +1000,34 @@ def _get_slurm_node_info_list(
             else:
                 node_gpu_type = 'GPU'
 
+        # sinfo %t appends single-char flags to the base state (sinfo(1) NODE
+        # STATE CODES): '*' not responding, '~' powered off, '#' powering up,
+        # '%' powering down, '!' pending power down, '$' maintenance,
+        # '@' reboot pending, '^' reboot issued, '-' planned, '+' completing.
+        # Compare on the BASE state: e.g. a MIXED+PLANNED node reports 'mix-',
+        # and an exact-match test would skip the allocation subtraction below
+        # and report a fully-busy node as fully free.
+        base_state = state.rstrip('*~#%$@^-!+')
+
         # Get allocated GPUs
         allocated_gpus = 0
         # TODO(zhwu): move to enum
-        if state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
-                     'comp'):
+        if base_state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
+                          'comp'):
             jobs_gres = nodes_to_jobs_gres.get(node_name, [])
             if jobs_gres:
                 for job_line in jobs_gres:
                     _, job_gpu_count = get_gpu_type_and_count(job_line)
                     allocated_gpus += job_gpu_count
-            elif state == 'alloc':
+            elif base_state == 'alloc':
                 # If no GRES info found but node is fully allocated,
                 # assume all GPUs are in use.
                 allocated_gpus = total_gpus
-        elif state == 'idle':
+        elif base_state == 'idle':
             allocated_gpus = 0
 
-        free_gpus = total_gpus - allocated_gpus if state not in ('down',
-                                                                 'drain',
-                                                                 'drng',
-                                                                 'maint') else 0
+        free_gpus = total_gpus - allocated_gpus if base_state not in (
+            'down', 'drain', 'drng', 'maint') else 0
         free_gpus = max(0, free_gpus)
 
         slurm_nodes_info[node_name] = {

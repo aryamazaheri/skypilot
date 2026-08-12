@@ -147,3 +147,15 @@ def test_head_node_wait_does_not_fail_on_a_successful_third_attempt():
     block = _k3s_install_block()
     assert 'ready=1' in block
     assert '$i -eq 3' not in block
+
+
+def test_deploy_leaves_its_node_schedulable():
+    """A cordoned node is still `Ready`, so the readiness wait passes and `sky check ssh`
+    reports the pool enabled — then every pod stays Pending and the launch dies with an
+    opaque ResourcesUnavailableError ("1 node(s) were unschedulable"). Re-deploying the
+    same machine reuses the node name and inherits its old cordon, so deploy must leave
+    the node it just installed schedulable."""
+    block = _k3s_install_block()
+    assert 'uncordon "{head_node}"' in block
+    # Never fatal: a pool that is otherwise up must not fail on this safety net.
+    assert 'uncordon "{head_node}" --kubeconfig ~/.kube/config || true' in block

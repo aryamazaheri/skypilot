@@ -537,6 +537,13 @@ def deploy_single_cluster(cluster_name,
             echo 'Head node did not become ready after 3 attempts'
             exit 1
         fi
+        # A cordoned node is still "Ready", so the wait above passes and the pool comes
+        # up looking healthy while every pod stays Pending ("1 node(s) were
+        # unschedulable") — `sky check ssh` reports enabled and the launch fails later
+        # with an opaque ResourcesUnavailableError. Re-deploying the SAME machine
+        # inherits its old cordon (the node name is reused), so make deploy leave the
+        # node it just installed schedulable. Idempotent; never fatal.
+        kubectl uncordon "{head_node}" --kubeconfig ~/.kube/config || true
     """
     result = deploy_utils.run_remote(head_node,
                                      cmd,
