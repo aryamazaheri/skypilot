@@ -329,6 +329,34 @@ class SlurmClient:
             stream_logs=False)
         return stdout.splitlines()
 
+    def gres_used_by_node(self) -> Dict[str, str]:
+        """Per-node GresUsed from sinfo (e.g. 'gpu:a100:8(IDX:0-7)').
+
+        This is the authoritative allocated-GPU count per node: it reflects the
+        node's actual GRES allocation no matter how jobs requested GPUs. The
+        squeue-based get_all_jobs_gres() below only sees tres-per-node (%b),
+        which is blank for jobs submitted with --gpus/--gpus-per-task — such
+        jobs made fully-busy nodes read as fully free.
+        """
+        cmd = 'sinfo -h --Node -O "NodeList:100,GresUsed:200"'
+        rc, stdout, stderr = self._run_slurm_cmd(cmd)
+        subprocess_utils.handle_returncode(
+            rc,
+            cmd,
+            'Failed to get Slurm GresUsed information.',
+            stderr=f'{stdout}\n{stderr}',
+            stream_logs=False)
+
+        used: Dict[str, str] = {}
+        for line in stdout.splitlines():
+            parts = line.split(None, 1)
+            if not parts:
+                continue
+            node = parts[0].strip()
+            # A node can repeat (one line per partition); GresUsed is identical.
+            used[node] = parts[1].strip() if len(parts) > 1 else ''
+        return used
+
     def get_all_jobs_gres(self) -> Dict[str, List[str]]:
         """Get GRES allocation for all running jobs, grouped by node.
 

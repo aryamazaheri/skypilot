@@ -982,6 +982,16 @@ def _get_slurm_node_info_list(
     slurm_nodes_info: Dict[str, Dict[str, Any]] = {}
 
     nodes_to_jobs_gres = slurm_client.get_all_jobs_gres()
+    # Authoritative per-node allocation (sinfo GresUsed). The squeue %b fallback
+    # below misses jobs that requested GPUs via --gpus/--gpus-per-task (their
+    # tres-per-node is N/A), which made fully-busy nodes read as fully free.
+    # Best-effort: an old sinfo without the GresUsed field just disables this.
+    try:
+        gres_used_by_node = slurm_client.gres_used_by_node()
+    except Exception as e:  # pylint: disable=broad-except
+        logger.debug(f'Could not get GresUsed from sinfo '
+                     f'(falling back to squeue job GRES): {e}')
+        gres_used_by_node = {}
     for node_info in node_infos:
         node_name = node_info.node
         state = node_info.state
@@ -1009,11 +1019,16 @@ def _get_slurm_node_info_list(
         # and report a fully-busy node as fully free.
         base_state = state.rstrip('*~#%$@^-!+')
 
-        # Get allocated GPUs
+        # Get allocated GPUs: prefer the node's own GresUsed (exact, regardless
+        # of how jobs requested GPUs); fall back to summing job GRES from
+        # squeue, which only covers tres-per-node requests.
         allocated_gpus = 0
+        used_str = gres_used_by_node.get(node_name)
+        if used_str:
+            _, allocated_gpus = get_gpu_type_and_count(used_str)
         # TODO(zhwu): move to enum
-        if base_state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
-                          'comp'):
+        elif base_state in ('alloc', 'mix', 'drain', 'drng', 'drained', 'resv',
+                            'comp'):
             jobs_gres = nodes_to_jobs_gres.get(node_name, [])
             if jobs_gres:
                 for job_line in jobs_gres:
