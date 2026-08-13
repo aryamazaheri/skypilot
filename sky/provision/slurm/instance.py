@@ -56,6 +56,31 @@ _SBATCH_PROTECTED_OPTIONS = frozenset({
 })
 
 
+_MEM_FLAGS = frozenset({'mem', 'mem-per-cpu', 'mem-per-gpu'})
+
+
+def _mem_directive(memory_gb: Any, sbatch_options: Dict[str, Any]) -> str:
+    """The `#SBATCH --mem=` line, or '' when the user supplies their own memory flag.
+
+    Panocular: Slurm treats --mem, --mem-per-cpu and --mem-per-gpu as MUTUALLY EXCLUSIVE
+    and aborts with `fatal: --mem, --mem-per-cpu, and --mem-per-gpu are mutually
+    exclusive.` if more than one appears, so a user-supplied alternative has to REPLACE
+    SkyPilot's --mem rather than sit next to it -- otherwise every job on the cluster
+    becomes unsubmittable. `mem` itself is in _SBATCH_PROTECTED_OPTIONS (dropped with a
+    warning), so in practice only the per-cpu/per-gpu forms arrive here. Some sites
+    mandate them: TU Darmstadt's job_submit plugin rejects --mem outright with
+    "Parameter --mem not allowed. Please use --mem-per-cpu instead."
+    """
+    if {k.replace('_', '-') for k in sbatch_options} & _MEM_FLAGS:
+        return ''
+    if float(memory_gb) <= 0:
+        return ''
+    # Memory is in MB to support fractional GB values (e.g. 0.5GB -> 512M), since
+    # Slurm's --mem requires integer values per unit. Slurm's M suffix means MiB
+    # (1G = 1024M), matching SkyPilot's GB convention.
+    return f'#SBATCH --mem={int(float(memory_gb) * 1024)}M\n'
+
+
 def _build_custom_sbatch_directives(sbatch_options: Dict[str, Any]) -> str:
     """Build #SBATCH directive lines from user-supplied sbatch_options.
 
@@ -618,14 +643,7 @@ echo "[container-init] Packages installed in $((SECONDS - INIT_START))s"
     # By default stdout and stderr will be written to $HOME/slurm-%j.out
     # (because we invoke sbatch from $HOME). Redirect elsewhere to not pollute
     # the home directory.
-    mem_directive = ''
-    if float(resources['memory']) > 0:
-        # Memory is in MB to support fractional GB values (e.g. 0.5GB ->
-        # 512M), since Slurm's --mem requires integer values per unit.
-        # Slurm's M suffix means MiB (1G = 1024M), matching SkyPilot's
-        # GB convention.
-        mem_in_mb = int(float(resources['memory']) * 1024)
-        mem_directive = f'#SBATCH --mem={mem_in_mb}M\n'
+    mem_directive = _mem_directive(resources['memory'], sbatch_options)
     # pylint: disable=line-too-long
     # fmt: off
     provision_script = f"""\

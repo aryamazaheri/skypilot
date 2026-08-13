@@ -11,6 +11,7 @@ from sky.provision.slurm import instance as slurm_instance
 from sky.provision.slurm.instance import _build_custom_sbatch_directives
 from sky.provision.slurm.instance import _build_sbatch_directives
 from sky.provision.slurm.instance import _compute_time_directive
+from sky.provision.slurm.instance import _mem_directive
 from sky.provision.slurm.instance import _SBATCH_PROTECTED_OPTIONS
 from sky.utils.schemas import get_config_schema
 
@@ -407,3 +408,27 @@ class TestSbatchConfigSchema:
                     }
                 }
             })
+
+
+class TestMemDirective:
+    """--mem must stand down when the user supplies their own memory flag.
+
+    Slurm calls --mem/--mem-per-cpu/--mem-per-gpu mutually exclusive and aborts fatally
+    when more than one is present, so emitting both made every job on a site that mandates
+    --mem-per-cpu unsubmittable ("Parameter --mem not allowed").
+    """
+
+    def test_mem_emitted_when_user_sets_no_memory_flag(self):
+        assert _mem_directive(16, {'account': 'x'}) == '#SBATCH --mem=16384M\n'
+
+    def test_fractional_gb_still_rounds_to_mb(self):
+        assert _mem_directive(0.5, {}) == '#SBATCH --mem=512M\n'
+
+    def test_zero_memory_emits_nothing(self):
+        assert _mem_directive(0, {}) == ''
+
+    @pytest.mark.parametrize('flag', ['mem-per-cpu', 'mem_per_cpu',
+                                      'mem-per-gpu', 'mem_per_gpu', 'mem'])
+    def test_user_memory_flag_suppresses_mem(self, flag):
+        # Underscore and hyphen spellings both count -- they normalize to the same flag.
+        assert _mem_directive(16, {flag: 2000, 'account': 'x'}) == ''
